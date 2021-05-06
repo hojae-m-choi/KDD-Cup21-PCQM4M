@@ -25,5 +25,5 @@ dependencies:
   - statsmodels
   - rdkit
   - pip:
-      - ogb
+      - ogb==1.3.1
 
