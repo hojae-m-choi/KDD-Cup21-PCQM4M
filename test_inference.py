@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import StepLR
 
-from gnn import GNN
+from model.gnn import GNN
 
 import os
 from tqdm import tqdm
