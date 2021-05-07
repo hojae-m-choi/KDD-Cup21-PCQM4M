@@ -161,7 +161,8 @@ if __name__ == "__main__":
     parser.add_argument('-b', dest='batch_size', type=int, default=256)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--resume', type=str, default='')
-    parser.add_argument('--no_resume_opt', action='store_true', default=False)
+    parser.add_argument('--no-resume-opt', action='store_true', default=False)
+    parser.add_argument('--add-position', action='store_true', default=False)
 
     # model
     parser.add_argument('--emb-dim', type=int, default=128)

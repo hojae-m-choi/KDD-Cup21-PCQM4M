@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import torch
 from pqdm.processes import pqdm
+from tqdm import tqdm
 
 
 def _smiles2graph(smiles_string, gap):
@@ -29,23 +30,11 @@ def _smiles2graph(smiles_string, gap):
     mol = Chem.MolFromSmiles(smiles_string)
 
     # atom positions
-    # mol = Chem.AddHs(mol)
-    # # AllChem.EmbedMolecule(mol, randomSeed=0xf00d)  # seed from tutorial
-    # try:
-    #     AllChem.EmbedMolecule(mol, useRandomCoords=True)
-    #     AllChem.MMFFOptimizeMolecule(mol)
-    #     mol = Chem.RemoveHs(mol)
-    #     conformer = mol.GetConformers()[0]
-    #     # print(Chem.MolToMolBlock(mol))
-    # except ValueError:
-    #     print(f'retry embedding without Hs: {smiles_string}')
-    #     mol = Chem.RemoveHs(mol)
-    #     AllChem.EmbedMolecule(mol, useRandomCoords=True, maxAttempts=10000)
-    #     # AllChem.MMFFOptimizeMolecule(mol)
-    #     conformer = mol.GetConformers()[0]
-    #
-    # node_positions = conformer.GetPositions()
-    # node_positions = np.array(node_positions)
+    mol = Chem.AddHs(mol)
+    AllChem.Compute2DCoords(mol)
+    mol = Chem.RemoveHs(mol)
+    conformer = mol.GetConformers()[0]
+    node_positions = np.array(conformer.GetPositions())
 
     # atoms
     atom_features_list = []
@@ -84,27 +73,27 @@ def _smiles2graph(smiles_string, gap):
     graph['edge_index'] = edge_index
     graph['edge_feat'] = edge_attr
     graph['node_feat'] = x
-    # graph['node_pos'] = node_positions
+    graph['node_pos'] = node_positions[:, :2]
     graph['num_nodes'] = len(x)
 
     assert (len(graph['edge_feat']) == graph['edge_index'].shape[1])
     assert (len(graph['node_feat']) == graph['num_nodes'])
-    # assert (len(graph['node_pos']) == graph['num_nodes'])
+    assert (len(graph['node_pos']) == graph['num_nodes'])
 
     dgl_graph = dgl.graph((graph['edge_index'][0], graph['edge_index'][1]), num_nodes=graph['num_nodes'])
     dgl_graph.edata['feat'] = torch.from_numpy(graph['edge_feat']).to(torch.int64)
     dgl_graph.ndata['feat'] = torch.from_numpy(graph['node_feat']).to(torch.int64)
-    # dgl_graph.ndata['pos'] = torch.from_numpy(graph['node_pos']).float()
+    dgl_graph.ndata['pos'] = torch.from_numpy(graph['node_pos']).float()
 
     return dgl_graph, gap
 
 
-class DglPCQM4MDataset(_PCQM4MDataset):
+class DglPCQM4MDatasetForDebug(_PCQM4MDataset):
     """
     Added node 3D positions and replace tqdm to pqdm.
     """
-    def __init__(self, root, smiles2graph=_smiles2graph):
-        super().__init__(root, smiles2graph)
+    def __init__(self, root):
+        super().__init__(root)
 
     def prepare_graph(self):
         processed_dir = osp.join(self.folder, 'processed')
@@ -126,46 +115,76 @@ class DglPCQM4MDataset(_PCQM4MDataset):
         return split_dict
 
 
-    # TODO;
-    # def prepare_graph(self):
-    #     processed_dir = osp.join(self.folder, 'processed')
-    #     raw_dir = osp.join(self.folder, 'raw')
-    #     pre_processed_file_path = osp.join(processed_dir, 'dgl_data_processed')
-    #
-    #     if osp.exists(pre_processed_file_path):
-    #         # if pre-processed file already exists
-    #         self.graphs, label_dict = load_graphs(pre_processed_file_path)
-    #         self.labels = label_dict['labels']
-    #     else:
-    #         # if pre-processed file does not exist
-    #
-    #         if not osp.exists(osp.join(raw_dir, 'data.csv.gz')):
-    #             # if the raw file does not exist, then download it.
-    #             self.download()
-    #
-    #         data_df = pd.read_csv(osp.join(raw_dir, 'data.csv.gz'))
-    #         smiles_list = data_df['smiles']
-    #         homolumogap_list = data_df['homolumogap']
-    #
-    #         n_jobs = multiprocessing.cpu_count() // 2
-    #         # n_jobs = 1
-    #         print(f'Converting SMILES strings into graphs with {n_jobs} cpus...')
-    #         results = pqdm(
-    #             zip(smiles_list, homolumogap_list),
-    #             _smiles2graph,
-    #             n_jobs=n_jobs,
-    #             total=len(homolumogap_list),
-    #             argument_type='args'
-    #         )
-    #
-    #         self.graphs, self.labels = zip(*results)
-    #         self.labels = torch.tensor(self.labels, dtype=torch.float32)
-    #
-    #         # double-check prediction target
-    #         split_dict = self.get_idx_split()
-    #         assert (all([not torch.isnan(self.labels[i]) for i in split_dict['train']]))
-    #         assert (all([not torch.isnan(self.labels[i]) for i in split_dict['valid']]))
-    #         assert (all([torch.isnan(self.labels[i]) for i in split_dict['test']]))
-    #
-    #         print('Saving...')
-    #         save_graphs(pre_processed_file_path, self.graphs, labels={'labels': self.labels})
+class DglPCQM4MDatasetWithPosition(_PCQM4MDataset):
+    def __init__(self, root, smiles2graph=_smiles2graph):
+        super().__init__(root, smiles2graph)
+
+    def prepare_graph(self):
+        processed_dir = osp.join(self.folder, 'processed')
+        raw_dir = osp.join(self.folder, 'raw')
+        pre_processed_file_path = osp.join(processed_dir, 'dgl_data_processed_with_position')
+
+        if osp.exists(pre_processed_file_path):
+            # if pre-processed file already exists
+            self.graphs, label_dict = load_graphs(pre_processed_file_path)
+            self.labels = label_dict['labels']
+        else:
+            # if pre-processed file does not exist
+            if not osp.exists(osp.join(raw_dir, 'data.csv.gz')):
+                # if the raw file does not exist, then download it.
+                self.download()
+
+            data_df = pd.read_csv(osp.join(raw_dir, 'data.csv.gz'))
+            smiles_list = data_df['smiles']
+            homolumogap_list = data_df['homolumogap']
+
+            print('Converting SMILES strings into graphs...')
+            self.graphs = []
+            self.labels = []
+            for smiles_string, gap in tqdm(zip(smiles_list, homolumogap_list), total=len(homolumogap_list)):
+                dgl_graph, gap = self.smiles2graph(smiles_string, gap)
+
+                self.graphs.append(dgl_graph)
+                self.labels.append(gap)
+
+            self.labels = torch.tensor(self.labels, dtype=torch.float32)
+
+            # double-check prediction target
+            split_dict = self.get_idx_split()
+            assert (all([not torch.isnan(self.labels[i]) for i in split_dict['train']]))
+            assert (all([not torch.isnan(self.labels[i]) for i in split_dict['valid']]))
+            assert (all([torch.isnan(self.labels[i]) for i in split_dict['test']]))
+
+            print('Saving...')
+            save_graphs(pre_processed_file_path, self.graphs, labels={'labels': self.labels})
+
+
+class DglPCQM4MDatasetWithPositionForDebug(DglPCQM4MDatasetWithPosition):
+    def __init__(self, root, smiles2graph=_smiles2graph):
+        super().__init__(root, smiles2graph)
+
+    def prepare_graph(self):
+        processed_dir = osp.join(self.folder, 'processed')
+        raw_dir = osp.join(self.folder, 'raw')
+        pre_processed_file_path = osp.join(processed_dir, 'dgl_data_processed_with_position')
+
+        if osp.exists(pre_processed_file_path):
+            # if pre-processed file already exists
+            self.graphs, label_dict = load_graphs(pre_processed_file_path, list(range(102400)))
+            self.labels = label_dict['labels']
+
+    def get_idx_split(self):
+        cur = 102400 - 2048
+        split_dict = {
+            'train': torch.from_numpy(np.array(list(range(cur)))),
+            'valid': torch.from_numpy(np.array(list(range(cur, cur + 1024)))),
+            'test': torch.from_numpy(np.array(list(range(cur + 1024, cur + 2048))))
+        }
+        return split_dict
+
+
+if __name__ == "__main__":
+    import os
+    root = os.path.join(os.path.dirname(__file__), '..', '..', 'dataset')
+    root = os.path.abspath(root)
+    dataset = DglPCQM4MDatasetWithPosition(root)
