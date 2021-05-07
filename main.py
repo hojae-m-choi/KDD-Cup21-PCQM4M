@@ -1,6 +1,8 @@
 import argparse
 import os
 import random
+import logging
+from collections import OrderedDict
 from datetime import datetime
 import time
 
@@ -16,6 +18,44 @@ from engine.valid import validate
 from model.model import Perceiver
 from utils.checkpoint_saver import CheckpointSaver
 from utils.summary import update_summary
+
+
+_logger = logging.getLogger(__name__)
+
+
+def resume_checkpoint(model, checkpoint_path, optimizer=None, log_info=True):
+    resume_epoch = None
+    if os.path.isfile(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+            if log_info:
+                _logger.info('Restoring model state from checkpoint...')
+            new_state_dict = OrderedDict()
+            for k, v in checkpoint['state_dict'].items():
+                name = k[7:] if k.startswith('module') else k
+                new_state_dict[name] = v
+            model.load_state_dict(new_state_dict)
+
+            if optimizer is not None and 'optimizer' in checkpoint:
+                if log_info:
+                    _logger.info('Restoring optimizer state from checkpoint...')
+                optimizer.load_state_dict(checkpoint['optimizer'])
+
+            if 'epoch' in checkpoint:
+                resume_epoch = checkpoint['epoch']
+                if 'version' in checkpoint and checkpoint['version'] > 1:
+                    resume_epoch += 1  # start at the next epoch, old checkpoints incremented before save
+
+            if log_info:
+                _logger.info("Loaded checkpoint '{}' (epoch {})".format(checkpoint_path, checkpoint['epoch']))
+        else:
+            model.load_state_dict(checkpoint)
+            if log_info:
+                _logger.info("Loaded checkpoint '{}'".format(checkpoint_path))
+        return resume_epoch
+    else:
+        _logger.error("No checkpoint found at '{}'".format(checkpoint_path))
+        raise FileNotFoundError()
 
 
 def seed_everything(seed):
@@ -36,11 +76,22 @@ def main(args):
         num_latents=args.num_latents,
         latent_dim=args.latent_dim,
     )
+    model.cuda()
 
     seed_everything(args.seed)
 
     optimizer = optim.Adam(model.parameters(), 1e-3)  # TODO; LR
     scheduler = StepLR(optimizer, step_size=30, gamma=0.25)
+
+    start_epoch = 0
+    if args.resume:
+        start_epoch = resume_checkpoint(
+            model,
+            args.resume,
+            optimizer=None if args.no_resume_opt else optimizer,
+        )
+        scheduler.__dict__.update({'last_epoch': start_epoch-1})
+        print(f"Restore scheduler last epoch: {scheduler.last_epoch}")
 
     # dataset
     print(f"Start loading dataset...")
@@ -48,7 +99,7 @@ def main(args):
     train_dataset, valid_dataset, test_dataset = create_dataset(args)
     print(f"Dataset is loaded, took {time.time()-start:.2f}s")
 
-    train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size)
+    train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     valid_loader = GraphDataLoader(valid_dataset, batch_size=args.batch_size)
     transferer = AsyncTransferer(torch.device('cuda:0'))
 
@@ -71,7 +122,7 @@ def main(args):
 
     best_metric = None
     best_epoch = None
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         train_metric = train_one_epoch(
             epoch=epoch,
             model=model,
@@ -109,6 +160,8 @@ if __name__ == "__main__":
     parser.add_argument('--data', type=str, default=default_data_folder)
     parser.add_argument('-b', dest='batch_size', type=int, default=256)
     parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--resume', type=str, default='')
+    parser.add_argument('--no_resume_opt', action='store_true', default=False)
 
     # model
     parser.add_argument('--emb-dim', type=int, default=128)

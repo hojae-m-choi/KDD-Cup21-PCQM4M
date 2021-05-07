@@ -12,7 +12,6 @@ def train_one_epoch(
         optimizer,
         transferer,
 ):
-    model.cuda()
     model.train()
     last_batch = len(loader) - 1
 
