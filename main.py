@@ -9,7 +9,7 @@ import time
 import numpy as np
 import torch
 import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from dgl.dataloading import GraphDataLoader, AsyncTransferer
 
 from data.factory import create_dataset
@@ -75,13 +75,19 @@ def main(args):
         self_per_cross=args.self_per_cross,
         num_latents=args.num_latents,
         latent_dim=args.latent_dim,
+        attn_dropout=args.attn_dropout,
+        ff_dropout=args.ff_dropout,
     )
     model.cuda()
 
     seed_everything(args.seed)
 
-    optimizer = optim.Adam(model.parameters(), 1e-3)  # TODO; LR
-    scheduler = StepLR(optimizer, step_size=30, gamma=0.25)
+    optimizer = optim.Adam(model.parameters(), 1e-3, weight_decay=args.decay)  # TODO; LR
+    if args.sched:
+        if args.sched == 'step':
+            scheduler = StepLR(optimizer, step_size=30, gamma=0.25)
+        elif args.sched == 'cosine':
+            scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     start_epoch = 0
     if args.resume:
@@ -163,6 +169,8 @@ if __name__ == "__main__":
     parser.add_argument('--resume', type=str, default='')
     parser.add_argument('--no-resume-opt', action='store_true', default=False)
     parser.add_argument('--add-position', action='store_true', default=False)
+    parser.add_argument('--sched', type=str, default='')
+    parser.add_argument('--decay', type=float, default=0.0)
 
     # model
     parser.add_argument('--emb-dim', type=int, default=128)
@@ -170,6 +178,8 @@ if __name__ == "__main__":
     parser.add_argument('--self-per-cross', type=int, default=1)
     parser.add_argument('--num-latents', type=int, default=128)
     parser.add_argument('--latent-dim', type=int, default=256)
+    parser.add_argument('--attn-dropout', type=float, default=0.2)
+    parser.add_argument('--ff-dropout', type=float, default=0.2)
 
     # misc
     parser.add_argument('--debug', action='store_true', default=False)
