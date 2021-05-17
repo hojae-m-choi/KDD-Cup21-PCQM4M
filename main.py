@@ -102,7 +102,7 @@ def main(args):
     # dataset
     print(f"Start loading dataset...")
     start = time.time()
-    train_dataset, valid_dataset, test_dataset = create_dataset_pyg(args)
+    train_dataset, valid_dataset, test_dataset = create_dataset(args)
     print(f"Dataset is loaded, took {time.time()-start:.2f}s")
 
     train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
@@ -184,6 +184,7 @@ if __name__ == "__main__":
     # misc
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--seed', default=42)
+    parser.add_argument('--platform', type=str, default='pyg')
 
     args = parser.parse_args()
     main(args)

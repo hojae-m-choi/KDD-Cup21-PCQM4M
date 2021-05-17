@@ -11,6 +11,12 @@ from data.dataset import (
     PygPCQM4MDatasetWithPositionForDebug
 )
 
+def create_dataset(args):
+    if args.platform == 'pyg':
+        return create_dataset_pyg(args)
+    elif args.platform == 'dgl':
+        return create_dataset_dgl(args)
+    
 def create_dataset_pyg(args):
     if args.debug:
         if args.add_position:
@@ -32,7 +38,7 @@ def create_dataset_pyg(args):
 
 
 
-def create_dataset(args):
+def create_dataset_dgl(args):
     if args.debug:
         if args.add_position:
             dataset_cls = DglPCQM4MDatasetWithPositionForDebug
