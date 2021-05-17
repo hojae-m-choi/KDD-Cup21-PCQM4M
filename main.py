@@ -12,7 +12,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 from dgl.dataloading import GraphDataLoader, AsyncTransferer
 
-from data.factory import create_dataset
+from data.factory import create_dataset, create_dataset_pyg
 from engine.train import train_one_epoch
 from engine.valid import validate
 from model.model import Perceiver
@@ -96,7 +96,7 @@ def main(args):
     # dataset
     print(f"Start loading dataset...")
     start = time.time()
-    train_dataset, valid_dataset, test_dataset = create_dataset(args)
+    train_dataset, valid_dataset, test_dataset = create_dataset_pyg(args)
     print(f"Dataset is loaded, took {time.time()-start:.2f}s")
 
     train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
