@@ -18,7 +18,7 @@ class SetEncoder(nn.Module):
         self.out_features = emb_dim
 
     def forward(self, graph, atom_input, bond_input):
-        batch_num_edges = graph.batch_num_edges() / 2
+        batch_num_edges = graph.batch_num_edges() // 2
         batch_size = graph.batch_size
         max_num_edges = int(torch.max(batch_num_edges).item())
         shape = (batch_size, max_num_edges, self.out_features)
