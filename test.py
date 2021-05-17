@@ -7,17 +7,13 @@ from datetime import datetime
 import time
 
 import numpy as np
+from tqdm import tqdm
 import torch
-import torch.optim as optim
-from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from dgl.dataloading import GraphDataLoader, AsyncTransferer
+from ogb.lsc import PCQM4MDataset, PCQM4MEvaluator
 
-from data.factory import create_dataset, create_dataset_pyg
-from engine.train import train_one_epoch
-from engine.valid import validate
+from data.dataset import _smiles2graph
 from model.model import Perceiver
-from utils.checkpoint_saver import CheckpointSaver
-from utils.summary import update_summary
 
 
 _logger = logging.getLogger(__name__)
@@ -68,6 +64,50 @@ def seed_everything(seed):
     torch.backends.cudnn.benchmark = True  # for faster training, but not deterministic
 
 
+def test(model, loader, transferer):
+    model.eval()
+    y_pred = []
+
+    pbar = tqdm(loader, ascii=True)
+    for step, graph in enumerate(pbar):
+        atom_input = graph.ndata['feat']
+        atom_input_gpu = transferer.async_copy(atom_input, torch.device('cuda:0'))
+        bond_input = graph.edata['feat']
+        bond_input_gpu = transferer.async_copy(bond_input, torch.device('cuda:0'))
+
+        with torch.no_grad():
+            pred = model(graph, atom_input_gpu.wait(), bond_input_gpu.wait())
+
+        y_pred.append(pred.detach().cpu())
+
+    y_pred = torch.cat(y_pred, dim=0)
+
+    return y_pred
+
+
+class OnTheFlyPCQMDataset(object):
+    def __init__(self, smiles_list, smiles2graph=_smiles2graph):
+        super(OnTheFlyPCQMDataset, self).__init__()
+        self.smiles_list = smiles_list
+        self.smiles2graph = smiles2graph
+
+    def __getitem__(self, idx):
+        '''Get datapoint with index'''
+        smiles, _ = self.smiles_list[idx]
+        graph, _ = self.smiles2graph(smiles, None)
+
+        return graph
+
+    def __len__(self):
+        '''Length of the dataset
+        Returns
+        -------
+        int
+            Length of Dataset
+        '''
+        return len(self.smiles_list)
+
+
 def main(args):
     model = Perceiver(
         depth=args.depth,
@@ -75,85 +115,32 @@ def main(args):
         self_per_cross=args.self_per_cross,
         num_latents=args.num_latents,
         latent_dim=args.latent_dim,
-        attn_dropout=args.attn_dropout,
-        ff_dropout=args.ff_dropout,
     )
     model.cuda()
 
     seed_everything(args.seed)
 
-    optimizer = optim.Adam(model.parameters(), 1e-3, weight_decay=args.decay)  # TODO; LR
-    if args.sched:
-        if args.sched == 'step':
-            scheduler = StepLR(optimizer, step_size=30, gamma=0.25)
-        elif args.sched == 'cosine':
-            scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs)
-
-    start_epoch = 0
-    if args.resume:
-        start_epoch = resume_checkpoint(
-            model,
-            args.resume,
-            optimizer=None if args.no_resume_opt else optimizer,
-        )
-        scheduler.__dict__.update({'last_epoch': start_epoch-1})
-        print(f"Restore scheduler last epoch: {scheduler.last_epoch}")
-
-    # dataset
-    print(f"Start loading dataset...")
-    start = time.time()
-    train_dataset, valid_dataset, test_dataset = create_dataset_pyg(args)
-    print(f"Dataset is loaded, took {time.time()-start:.2f}s")
-
-    train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    valid_loader = GraphDataLoader(valid_dataset, batch_size=args.batch_size)
-    transferer = AsyncTransferer(torch.device('cuda:0'))
-
-    exp_name = '-'.join([
-        datetime.now().strftime("%Y%m%d-%H%M%S"),
-        # args.model,
-    ])
-    output_dir = os.path.join(os.path.dirname(__file__), '..', 'output', exp_name)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    saver = CheckpointSaver(
-        model=model,
-        optimizer=optimizer,
-        args=args,
-        checkpoint_dir=output_dir,
-        recovery_dir=output_dir,
-        decreasing=True,
+    start_epoch = resume_checkpoint(
+        model,
+        args.checkpoint,
+        optimizer=None,
     )
 
-    best_metric = None
-    best_epoch = None
-    for epoch in range(start_epoch, args.epochs):
-        train_metric = train_one_epoch(
-            epoch=epoch,
-            model=model,
-            loader=train_loader,
-            optimizer=optimizer,
-            transferer=transferer,
-        )
+    # dataset
+    smiles_dataset = PCQM4MDataset(root='dataset/', only_smiles=True)
+    split_idx = smiles_dataset.get_idx_split()
 
-        eval_metric = validate(
-            epoch=epoch,
-            model=model,
-            loader=valid_loader,
-            transferer=transferer,
-        )
+    test_smiles_dataset = [smiles_dataset[i] for i in split_idx['test']]
+    onthefly_dataset = OnTheFlyPCQMDataset(test_smiles_dataset)
 
-        update_summary(
-            epoch, train_metric, eval_metric, os.path.join(output_dir, 'summary.csv'),
-            write_header=best_metric is None
-        )
-        # save proper checkpoint with eval metric
-        save_metric = eval_metric['loss']
-        best_metric, best_epoch = saver.save_checkpoint(epoch, metric=save_metric)
+    loader = GraphDataLoader(onthefly_dataset, batch_size=args.batch_size)
+    transferer = AsyncTransferer(torch.device('cuda:0'))
+    evaluator = PCQM4MEvaluator()
 
-        # step
-        scheduler.step()
+    print('Predicting on test data...')
+    y_pred = test(model, loader, transferer)
+    print('Saving test submission file...')
+    evaluator.save_test_submission({'y_pred': y_pred}, args.save_test_dir)
 
 
 if __name__ == "__main__":
@@ -162,15 +149,13 @@ if __name__ == "__main__":
     default_data_folder = os.path.abspath(default_data_folder)
     parser = argparse.ArgumentParser()
 
-    # train
+    # data
+    parser.add_argument('checkpoint', type=str)
+    parser.add_argument('save_test_dir', type=str)
     parser.add_argument('--data', type=str, default=default_data_folder)
     parser.add_argument('-b', dest='batch_size', type=int, default=256)
     parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--resume', type=str, default='')
-    parser.add_argument('--no-resume-opt', action='store_true', default=False)
     parser.add_argument('--add-position', action='store_true', default=False)
-    parser.add_argument('--sched', type=str, default='')
-    parser.add_argument('--decay', type=float, default=0.0)
 
     # model
     parser.add_argument('--emb-dim', type=int, default=128)
@@ -178,8 +163,6 @@ if __name__ == "__main__":
     parser.add_argument('--self-per-cross', type=int, default=1)
     parser.add_argument('--num-latents', type=int, default=128)
     parser.add_argument('--latent-dim', type=int, default=256)
-    parser.add_argument('--attn-dropout', type=float, default=0.2)
-    parser.add_argument('--ff-dropout', type=float, default=0.2)
 
     # misc
     parser.add_argument('--debug', action='store_true', default=False)
