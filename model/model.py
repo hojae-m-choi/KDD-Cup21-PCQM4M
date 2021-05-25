@@ -54,7 +54,11 @@ class GAT(nn.Module):
 
 
 class Perceiver(nn.Module):
-    def __init__(self, depth, emb_dim, self_per_cross, num_latents, latent_dim):
+    def __init__(
+            self, depth, emb_dim,
+            self_per_cross, num_latents, latent_dim,
+            attn_dropout, ff_dropout,
+    ):
         super().__init__()
         self.encoder = SetEncoder(
             emb_dim=emb_dim
@@ -65,6 +69,8 @@ class Perceiver(nn.Module):
             self_per_cross_attn=self_per_cross,
             num_latents=num_latents,
             latent_dim=latent_dim,
+            attn_dropout=attn_dropout,
+            ff_dropout=ff_dropout,
         )
 
     def forward(self, graph, atom_input, bond_input):
