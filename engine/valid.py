@@ -59,7 +59,7 @@ def validate_pyg(
             # Compute loss
             loss = F.l1_loss(outputs, labels.cuda())
 
-        loss_m.update(loss.item(), graph.batch_size)
+        loss_m.update(loss.item(), data.batch.shape[0])
 
         if i % 10 == 0 or i == last_batch:
             pbar.set_description(f"Epoch {epoch:02d}, Loss {loss_m.avg:.5f}")
