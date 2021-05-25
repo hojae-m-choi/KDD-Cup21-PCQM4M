@@ -90,7 +90,7 @@ def _smiles2graph(smiles_string, gap):
 
     return dgl_graph, gap
 
-def smiles2graphWith2Dposition(smiles_string):
+def smiles2graphWith2Dposition(smiles_string, gap):
     """
     This function returns same graph dict, but
     added xyz position of atoms calculated from rdkit.
@@ -151,7 +151,7 @@ def smiles2graphWith2Dposition(smiles_string):
     assert (len(graph['node_feat']) == graph['num_nodes'])
     assert (len(graph['node_pos']) == graph['num_nodes'])
 
-    return graph
+    return graph, gap
 
 
 class DglPCQM4MDatasetForDebug(_PCQM4MDataset):
@@ -289,7 +289,7 @@ class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
 
             smiles = smiles_list[i]
             homolumogap = homolumogap_list[i]
-            graph = self.smiles2graph(smiles)
+            graph, gap = self.smiles2graph(smiles, homolumogap)
             
             assert(len(graph['edge_feat']) == graph['edge_index'].shape[1])
             assert(len(graph['node_feat']) == graph['num_nodes'])
