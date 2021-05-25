@@ -33,7 +33,42 @@ def train_one_epoch(
         loss.backward()
         optimizer.step()
 
-        loss_m.update(loss.item(), graph.batch_size)
+        loss_m.update(loss.item(), graph.batch_size )
+
+        if i % 10 == 0 or i == last_batch:
+            pbar.set_description(f"Epoch {epoch:02d}, Loss {loss_m.avg:.5f}")
+
+    return {
+        'loss': loss_m.avg
+    }
+
+def train_one_epoch_pyg(
+        epoch,
+        model,
+        loader,
+        optimizer
+):
+    model.train()
+    last_batch = len(loader) - 1
+
+    loss_m = AverageMeter()
+    pbar = tqdm(loader, ascii=True)
+    for i, data in enumerate(pbar):
+        data = data.cuda()
+        labels = data.y.reshape((-1, 1))
+
+        # Forward
+        outputs = model(data)
+
+        # Compute loss
+        loss = F.l1_loss(outputs, labels.cuda())
+
+        # Backward
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        loss_m.update(loss.item(), data.batch.shape[0])
 
         if i % 10 == 0 or i == last_batch:
             pbar.set_description(f"Epoch {epoch:02d}, Loss {loss_m.avg:.5f}")

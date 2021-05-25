@@ -11,11 +11,12 @@ import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from dgl.dataloading import GraphDataLoader, AsyncTransferer
+from torch_geometric.data import DataLoader
 
-from data.factory import create_dataset, create_dataset_pyg
-from engine.train import train_one_epoch
-from engine.valid import validate
-from model.model import Perceiver
+from data.factory import create_dataset
+from engine.train import train_one_epoch, train_one_epoch_pyg
+from engine.valid import validate, validate_pyg
+from model.model import Perceiver, GNN
 from utils.checkpoint_saver import CheckpointSaver
 from utils.summary import update_summary
 
@@ -69,15 +70,25 @@ def seed_everything(seed):
 
 
 def main(args):
-    model = Perceiver(
-        depth=args.depth,
-        emb_dim=args.emb_dim,
-        self_per_cross=args.self_per_cross,
-        num_latents=args.num_latents,
-        latent_dim=args.latent_dim,
-        attn_dropout=args.attn_dropout,
-        ff_dropout=args.ff_dropout,
-    )
+    shared_params = {
+        'num_layers': args.depth,
+        'emb_dim': args.emb_dim,
+        'graph_pooling': args.graph_pooling
+    }
+
+   
+    model = GNN(gnn_type = 'gvp+gin', virtual_node = True, **shared_params)
+        
+#     model = Perceiver(
+#         depth=args.depth,
+#         emb_dim=args.emb_dim,
+#         self_per_cross=args.self_per_cross,
+#         num_latents=args.num_latents,
+#         latent_dim=args.latent_dim,
+#         attn_dropout=args.attn_dropout,
+#         ff_dropout=args.ff_dropout,
+#     )
+
     model.cuda()
 
     seed_everything(args.seed)
@@ -104,11 +115,15 @@ def main(args):
     start = time.time()
     train_dataset, valid_dataset, test_dataset = create_dataset(args)
     print(f"Dataset is loaded, took {time.time()-start:.2f}s")
-
-    train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    valid_loader = GraphDataLoader(valid_dataset, batch_size=args.batch_size)
-    transferer = AsyncTransferer(torch.device('cuda:0'))
-
+    
+    if args.platform == 'pyg':
+        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+        valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False)
+    else:
+        train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+        valid_loader = GraphDataLoader(valid_dataset, batch_size=args.batch_size)
+        transferer = AsyncTransferer(torch.device('cuda:0'))
+    
     exp_name = '-'.join([
         datetime.now().strftime("%Y%m%d-%H%M%S"),
         # args.model,
@@ -129,20 +144,33 @@ def main(args):
     best_metric = None
     best_epoch = None
     for epoch in range(start_epoch, args.epochs):
-        train_metric = train_one_epoch(
+        if args.platform == 'pyg':
+            train_metric = train_one_epoch_pyg(
             epoch=epoch,
             model=model,
             loader=train_loader,
-            optimizer=optimizer,
-            transferer=transferer,
-        )
+            optimizer=optimizer
+            )
+            eval_metric = validate_pyg(
+                epoch=epoch,
+                model=model,
+                loader=valid_loader,
+            )
+        else:
+            train_metric = train_one_epoch(
+                epoch=epoch,
+                model=model,
+                loader=train_loader,
+                optimizer=optimizer,
+                transferer=transferer,
+            )
 
-        eval_metric = validate(
-            epoch=epoch,
-            model=model,
-            loader=valid_loader,
-            transferer=transferer,
-        )
+            eval_metric = validate(
+                epoch=epoch,
+                model=model,
+                loader=valid_loader,
+                transferer=transferer,
+            )
 
         update_summary(
             epoch, train_metric, eval_metric, os.path.join(output_dir, 'summary.csv'),
@@ -175,6 +203,8 @@ if __name__ == "__main__":
     # model
     parser.add_argument('--emb-dim', type=int, default=128)
     parser.add_argument('--depth', type=int, default=3)
+    parser.add_argument('--graph_pooling', type=str, default='sum',
+                        help='graph pooling strategy mean or sum (default: sum)')
     parser.add_argument('--self-per-cross', type=int, default=1)
     parser.add_argument('--num-latents', type=int, default=128)
     parser.add_argument('--latent-dim', type=int, default=256)

@@ -93,7 +93,7 @@ class GVP(nn.Module):
         self.so, self.vo = out_dims
         if self.vi: 
             self.h_dim = h_dim or max(self.vi, self.vo) 
-            self.wh = nn.Linear(self.vi, self.h_dim, bias=False)
+            self.wh = nn.Linear(self.vi, self.h_dim, bias=False) ## TODO: 왜 차원 오류가 나는지 확인
             self.ws = nn.Linear(self.h_dim + self.si, self.so)
             if self.vo:
                 self.wv = nn.Linear(self.h_dim, self.vo, bias=False)
@@ -113,8 +113,13 @@ class GVP(nn.Module):
         if self.vi:
             s, v = x
             v = torch.transpose(v, -1, -2)
-            vh = self.wh(v)    
+            vh = self.wh(v)    ## TODO: 왜 차원 오류가 나는지 확인 = edgeatrr의 position의 차원이 1인데 0으로 돼있었음 GVP 의 self.ve
             vn = _norm_no_nan(vh, axis=-2)
+            #print(f'vn.shape: {vn.shape}')
+            #print(f's.shape: {s.shape}')
+            #print(f'self.ws: {self.ws}')
+            #print(f'self.h_dim: {self.h_dim}')
+            #print(f'self.si: {self.si}')
             s = self.ws(torch.cat([s, vn], -1))
             if self.vo: 
                 v = self.wv(vh) 
@@ -249,14 +254,21 @@ class GVPConv(MessagePassing):
         message = self.propagate(edge_index, 
                     s=x_s, v=x_v.reshape(x_v.shape[0], 3*x_v.shape[1]),
                     edge_attr=edge_attr)
-        return _split(message, self.vo) 
+        if self.vo:
+            message = _split(message, self.vo) 
+        return message
 
     def message(self, s_i, v_i, s_j, v_j, edge_attr):
         v_j = v_j.view(v_j.shape[0], v_j.shape[1]//3, 3)
         v_i = v_i.view(v_i.shape[0], v_i.shape[1]//3, 3)
         message = tuple_cat((s_j, v_j), edge_attr, (s_i, v_i))
+        #print(f'message s.shape: {message[0].shape}')
+        #print(f'message v.shape: {message[1].shape}')
         message = self.message_func(message)
-        return _merge(*message)
+        #print(f'message after GVP: {message}')
+        if isinstance(message, tuple):
+            message= _merge(*message)
+        return message
 
 
 class GVPConvLayer(nn.Module):
