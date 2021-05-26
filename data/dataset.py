@@ -254,19 +254,17 @@ class PygPCQM4MDatasetForDebug(PygPCQM4MDataset):
     Added node 3D positions and replace tqdm to pqdm.
     """
     def __init__(self, root):
-        raise NotImplemented('get_idx_split in PygPCQM4MDatasetForDebug class should be implemented')
-#         super().__init__(root)
+        super().__init__(root)
     
     
     def get_idx_split(self):
-        raise NotImplemented('get_idx_split in PygPCQM4MDatasetForDebug class should be implemented')
-#         cur = 102400 - 2048
-#         split_dict = {
-#             'train': torch.from_numpy(np.array(list(range(cur)))),
-#             'valid': torch.from_numpy(np.array(list(range(cur, cur+1024)))),
-#             'test': torch.from_numpy(np.array(list(range(cur+1024, cur+2048))))
-#         }
-#         return split_dict
+        cur = 102400 - 2048
+        split_dict = {
+            'train': torch.from_numpy(np.array(list(range(cur)))),
+            'valid': torch.from_numpy(np.array(list(range(cur, cur+1024)))),
+            'test': torch.from_numpy(np.array(list(range(cur+1024, cur+2048))))
+        }
+        return split_dict
 
     
 class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
@@ -320,18 +318,16 @@ class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
 
 class PygPCQM4MDatasetWithPositionForDebug(PygPCQM4MDatasetWithPosition):
     def __init__(self, root, smiles2graph=_smiles2graph):
-        raise NotImplemented('get_idx_split in PygPCQM4MDatasetWithPositionForDebug class should be implemented')
-#         super().__init__(root, smiles2graph)
+        super().__init__(root, smiles2graph)
     
     def get_idx_split(self):
-        raise NotImplemented('get_idx_split in PygPCQM4MDatasetWithPositionForDebug class should be implemented')
-#         cur = 102400 - 2048
-#         split_dict = {
-#             'train': torch.from_numpy(np.array(list(range(cur)))),
-#             'valid': torch.from_numpy(np.array(list(range(cur, cur+1024)))),
-#             'test': torch.from_numpy(np.array(list(range(cur+1024, cur+2048))))
-#         }
-#         return split_dict
+        cur = 102400 - 2048
+        split_dict = {
+            'train': torch.from_numpy(np.array(list(range(cur)))),
+            'valid': torch.from_numpy(np.array(list(range(cur, cur+1024)))),
+            'test': torch.from_numpy(np.array(list(range(cur+1024, cur+2048))))
+        }
+        return split_dict
 
     
 if __name__ == "__main__":
