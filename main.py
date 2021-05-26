@@ -197,7 +197,7 @@ if __name__ == "__main__":
     parser.add_argument('--resume', type=str, default='')
     parser.add_argument('--no-resume-opt', action='store_true', default=False)
     parser.add_argument('--add-position', action='store_true', default=False)
-    parser.add_argument('--sched', type=str, default='')
+    parser.add_argument('--sched', type=str, default='step')
     parser.add_argument('--decay', type=float, default=0.0)
 
     # model
