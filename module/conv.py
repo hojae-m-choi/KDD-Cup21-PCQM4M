@@ -5,7 +5,7 @@ from torch_geometric.nn import global_mean_pool, global_add_pool
 from ogb.graphproppred.mol_encoder import AtomEncoder,BondEncoder
 from torch_geometric.utils import degree
 
-from module.gvp import GVPConv, _merge
+from module.gvp import GVPConv, _merge, GVPConvLayer, LayerNorm, Dropout
 import math
 
 ### GIN convolution along the graph structure
@@ -215,13 +215,16 @@ class GNN_node_Virtualnode(torch.nn.Module):
         self.mlp_virtualnode_list = torch.nn.ModuleList()
         
         if gnn_type == 'gvp+gin':
-#             self.convs.append( GVPConv( (emb_dim, 1), (emb_dim, 1), (emb_dim, 0), n_layers = 1) ) 
-            self.convs.append( GVPConv( (emb_dim, 1), (emb_dim, 0), (emb_dim, 1), n_layers = 2) )
+            self.gvplayer = GVPConvLayer( (emb_dim, 1), (emb_dim, 1), drop_rate= drop_ratio,)
+            self.convs.append( GVPConv( (emb_dim, 1), (emb_dim-3, 1), (emb_dim, 1), n_layers = 1) )
+            self.layer_norm = LayerNorm( (emb_dim-3, 1) )
             self.batch_norms.append(torch.nn.BatchNorm1d(emb_dim))
             
-            for layer in range(num_layers-1):
+            for layer in range(num_layers):
                 self.convs.append(GINConv(emb_dim))
                 self.batch_norms.append(torch.nn.BatchNorm1d(emb_dim))
+            
+            
                 
         else:
             for layer in range(num_layers):
@@ -257,12 +260,20 @@ class GNN_node_Virtualnode(torch.nn.Module):
                 if layer == 0:
                     x_pos3D = torch.cat ( [batched_data.x_pos, torch.zeros( (batched_data.x_pos.shape[0], 1) ).cuda() ] ,
                                          1).reshape( (batched_data.x_pos.shape[0], 1, 3) )
-                    #print( f'\nx_pos3D shape: {x_pos3D.shape}')
-                    edge_pos3D = torch.zeros( (batched_data.edge_attr.shape[0], 1, 3) ).cuda()
-                    #print( f'edge_attr shape: {edge_attr.shape}')
-                    #print( f'edge_pos3D shape: {edge_pos3D.shape}')
+#                     x_pos3D = batched_data.x_pos.reshape( (batched_data.x_pos.shape[0], 1, 3) )
+#                     edge_pos3D = torch.zeros( (batched_data.edge_attr.shape[0], 1, 3) ).cuda()
+                    
+                    src_idx = edge_index[0,:].transpose(0,-1)
+                    dst_idx = edge_index[1,:].transpose(0,-1)
+                    edge_pos3D = torch.cat( [ x_pos3D[src_idx, :, : ], x_pos3D[dst_idx, :, : ] ], dim = 1)
+#                     print(edge_pos3D.shape)    
+                    edge_pos3D = torch.mean(edge_pos3D, dim = -2, keepdim = True ).cuda()
+#                     print(edge_pos3D.shape)
                     edge_embedding = self.bond_encoder(edge_attr)
-                    h = self.convs[layer]( (h_list[layer], x_pos3D,), edge_index, (edge_embedding, edge_pos3D)  )
+                    h = self.gvplayer( (h_list[layer], x_pos3D,), edge_index, (edge_embedding, edge_pos3D)  )  
+                    h = self.convs[layer]( h, edge_index, (edge_embedding, edge_pos3D)  )
+                    h = self.layer_norm(h)
+                    h = _merge(h[0], h[1])
                 else:
                     h = self.convs[layer](h_list[layer], edge_index, edge_attr)
             else:

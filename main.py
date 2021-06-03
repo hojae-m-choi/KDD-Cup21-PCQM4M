@@ -77,7 +77,7 @@ def main(args):
     }
 
    
-    model = GNN(gnn_type = 'gvp+gin', virtual_node = True, **shared_params)
+    model = GNN(gnn_type = args.gnn_type, virtual_node = True, **shared_params)
         
 #     model = Perceiver(
 #         depth=args.depth,
@@ -201,6 +201,7 @@ if __name__ == "__main__":
     parser.add_argument('--decay', type=float, default=0.0)
 
     # model
+    parser.add_argument('--gnn-type', type=str, default='gin')
     parser.add_argument('--emb-dim', type=int, default=128)
     parser.add_argument('--depth', type=int, default=3)
     parser.add_argument('--graph_pooling', type=str, default='sum',

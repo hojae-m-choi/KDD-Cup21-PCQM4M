@@ -144,7 +144,7 @@ def smiles2graphWith2Dposition(smiles_string, gap):
     graph['edge_index'] = edge_index
     graph['edge_feat'] = edge_attr
     graph['node_feat'] = x
-    graph['node_pos'] = node_positions[:, :2]
+    graph['node_pos'] = node_positions[:, :3]
     graph['num_nodes'] = len(x)
 
     assert (len(graph['edge_feat']) == graph['edge_index'].shape[1])
