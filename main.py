@@ -11,11 +11,12 @@ import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR
 from dgl.dataloading import GraphDataLoader, AsyncTransferer
+from torch_geometric.data import DataListLoader
 
 from data.factory import create_dataset, create_dataset_pyg
 from engine.train import train_one_epoch
 from engine.valid import validate
-from model.model import Perceiver
+from model.model import Perceiver, GNN
 from utils.checkpoint_saver import CheckpointSaver
 from utils.summary import update_summary
 
@@ -69,15 +70,16 @@ def seed_everything(seed):
 
 
 def main(args):
-    model = Perceiver(
-        depth=args.depth,
-        emb_dim=args.emb_dim,
-        self_per_cross=args.self_per_cross,
-        num_latents=args.num_latents,
-        latent_dim=args.latent_dim,
-        attn_dropout=args.attn_dropout,
-        ff_dropout=args.ff_dropout,
-    )
+    # model = Perceiver(
+    #     depth=args.depth,
+    #     emb_dim=args.emb_dim,
+    #     self_per_cross=args.self_per_cross,
+    #     num_latents=args.num_latents,
+    #     latent_dim=args.latent_dim,
+    #     attn_dropout=args.attn_dropout,
+    #     ff_dropout=args.ff_dropout,
+    # )
+    model = GNN(graph_pooling='attention')
     model.cuda()
 
     seed_everything(args.seed)
@@ -105,9 +107,8 @@ def main(args):
     train_dataset, valid_dataset, test_dataset = create_dataset(args)
     print(f"Dataset is loaded, took {time.time()-start:.2f}s")
 
-    train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    valid_loader = GraphDataLoader(valid_dataset, batch_size=args.batch_size)
-    transferer = AsyncTransferer(torch.device('cuda:0'))
+    train_loader = DataListLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    valid_loader = DataListLoader(valid_dataset, batch_size=args.batch_size)
 
     exp_name = '-'.join([
         datetime.now().strftime("%Y%m%d-%H%M%S"),
@@ -134,14 +135,12 @@ def main(args):
             model=model,
             loader=train_loader,
             optimizer=optimizer,
-            transferer=transferer,
         )
 
         eval_metric = validate(
             epoch=epoch,
             model=model,
             loader=valid_loader,
-            transferer=transferer,
         )
 
         update_summary(
@@ -164,12 +163,12 @@ if __name__ == "__main__":
 
     # train
     parser.add_argument('--data', type=str, default=default_data_folder)
-    parser.add_argument('-b', dest='batch_size', type=int, default=256)
+    parser.add_argument('-b', dest='batch_size', type=int, default=2048)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--resume', type=str, default='')
     parser.add_argument('--no-resume-opt', action='store_true', default=False)
     parser.add_argument('--add-position', action='store_true', default=False)
-    parser.add_argument('--sched', type=str, default='')
+    parser.add_argument('--sched', type=str, default='step')
     parser.add_argument('--decay', type=float, default=0.0)
 
     # model

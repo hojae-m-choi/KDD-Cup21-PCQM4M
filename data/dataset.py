@@ -282,7 +282,7 @@ class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
 
         print('Converting SMILES strings into graphs...')
         data_list = []
-        for i in tqdm(range(len(smiles_list))):
+        for i in tqdm(range(len(smiles_list)), ascii=True):
             data = Data()
 
             smiles = smiles_list[i]
@@ -294,7 +294,18 @@ class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
 
             data.__num_nodes__ = int(graph['num_nodes'])
             data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
-            data.edge_attr = torch.from_numpy(graph['edge_feat']).to(torch.int64)
+            edge_attrs = []
+            if len(data.edge_index[0]) > 0:
+                edge_attrs.append(torch.from_numpy(graph['edge_feat']).to(torch.int64))
+                edge_attrs.append(torch.from_numpy(graph['node_feat'][data.edge_index[0]]))
+                edge_attrs.append(torch.from_numpy(graph['node_feat'][data.edge_index[1]]))
+            else:
+                edge_attrs.append(torch.zeros((1, 3)))
+                edge_attrs.append(torch.zeros((1, 9)))
+                edge_attrs.append(torch.zeros((1, 9)))
+            edge_attr = torch.cat(edge_attrs, -1)
+            data.edge_attr = edge_attr
+
             data.x_pos = torch.from_numpy(graph['node_pos']).to(torch.float32)
             data.x = torch.from_numpy(graph['node_feat']).to(torch.int64)
             data.y = torch.Tensor([homolumogap])
@@ -334,4 +345,4 @@ if __name__ == "__main__":
     import os
     root = os.path.join(os.path.dirname(__file__), '..', '..', 'dataset')
     root = os.path.abspath(root)
-    dataset = DglPCQM4MDatasetWithPosition(root)
+    dataset = PygPCQM4MDatasetWithPosition(root)
