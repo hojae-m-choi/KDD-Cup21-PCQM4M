@@ -289,14 +289,19 @@ class GVPConvLayer(nn.Module):
            with a different set of input node embeddings for messages
            where src >= dst
     '''
-    def __init__(self, node_dims, edge_dims,
+    def __init__(self, node_dims, edge_dims, node_o_dims = None,
                  n_message=3, n_feedforward=2, drop_rate=.1,
                  autoregressive=False):
         
         super(GVPConvLayer, self).__init__()
+        node_o_dims = node_dims if node_o_dims is None else node_o_dims
+        if all( [x < 0 for x in node_o_dims]) :
+                raise ValueError('The output dimension of GVPConvLayer should be non-negative value')
+                
         self.conv = GVPConv(node_dims, node_dims, edge_dims, n_message,
                            aggr="add" if autoregressive else "mean")
         self.norm = nn.ModuleList([LayerNorm(node_dims) for _ in range(2)])
+#         self.norm = nn.ModuleList([LayerNorm(node_o_dims), LayerNorm(node_o_dims)])
         self.dropout = nn.ModuleList([Dropout(drop_rate) for _ in range(2)])
 
         ff_func = []
