@@ -1,6 +1,6 @@
 import torch
 from torch_sparse import coalesce
-from torch_scatter import scatter_add
+from torch_scatter import scatter_add, scatter_mean
 from torch_geometric.utils import remove_self_loops
 
 class LineGraph(object):
@@ -33,6 +33,7 @@ class LineGraph(object):
         N = data.num_nodes
         edge_index, edge_attr = data.edge_index, data.edge_attr
         (row, col), edge_attr = coalesce(edge_index, edge_attr, N, N)
+        node_attrs = data.x
 
         if self.force_directed or data.is_directed():
             i = torch.arange(row.size(0), dtype=torch.long, device=row.device)
@@ -82,11 +83,14 @@ class LineGraph(object):
             joints, _ = coalesce(joints, None, N, N)
 
             if edge_attr is not None:
-                data.x = scatter_add(edge_attr, i, dim=0, dim_size=N)
+                data.x = scatter_mean(edge_attr, i, dim=0, dim_size=N)
             data.edge_index = joints
             data.num_nodes = edge_index.size(1) // 2
-
-        data.edge_attr = None
+        
+        node_attrs = torch.cat( 
+            [node_attr.repeat(count.tolist()[i]*(count.tolist()[i]-1), 1) for i, node_attr in enumerate(node_attrs)], 
+            dim = 0) 
+        data.edge_attr = node_attrs 
         return data
 
     def __repr__(self):
