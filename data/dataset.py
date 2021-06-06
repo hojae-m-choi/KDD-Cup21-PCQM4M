@@ -4,7 +4,7 @@ import shutil
 
 import dgl
 from dgl.data.utils import load_graphs, save_graphs, Subset
-from ogb.lsc import PygPCQM4MDataset
+from ogb.lsc import PygPCQM4MDataset as _PygPCQM4MDataset
 from ogb.lsc import DglPCQM4MDataset as _PCQM4MDataset
 from ogb.utils.features import (
     atom_to_feature_vector,
@@ -21,6 +21,7 @@ import torch
 from pqdm.processes import pqdm
 from tqdm import tqdm
 
+from utils.transforms import LineGraph
 
 def _smiles2graph(smiles_string, gap):
     """
@@ -91,6 +92,69 @@ def _smiles2graph(smiles_string, gap):
     return dgl_graph, gap
 
 def smiles2graphWith2Dposition(smiles_string):
+    """
+    This function returns same graph dict, but
+    added xyz position of atoms calculated from rdkit.
+    :param smiles_string:
+    :return:
+    """
+
+    mol = Chem.MolFromSmiles(smiles_string)
+
+    # atom positions
+    mol = Chem.AddHs(mol)
+    AllChem.Compute2DCoords(mol)
+    mol = Chem.RemoveHs(mol)
+    conformer = mol.GetConformers()[0]
+    node_positions = np.array(conformer.GetPositions())
+
+    # atoms
+    atom_features_list = []
+    for atom in mol.GetAtoms():
+        atom_features_list.append(atom_to_feature_vector(atom))
+    x = np.array(atom_features_list, dtype=np.int64)
+
+    # bonds
+    num_bond_features = 3  # bond type, bond stereo, is_conjugated
+    if len(mol.GetBonds()) > 0:  # mol has bonds
+        edges_list = []
+        edge_features_list = []
+        for bond in mol.GetBonds():
+            i = bond.GetBeginAtomIdx()
+            j = bond.GetEndAtomIdx()
+
+            edge_feature = bond_to_feature_vector(bond)
+
+            # add edges in both directions
+            edges_list.append((i, j))
+            edge_features_list.append(edge_feature)
+            edges_list.append((j, i))
+            edge_features_list.append(edge_feature)
+
+        # data.edge_index: Graph connectivity in COO format with shape [2, num_edges]
+        edge_index = np.array(edges_list, dtype=np.int64).T
+
+        # data.edge_attr: Edge feature matrix with shape [num_edges, num_edge_features]
+        edge_attr = np.array(edge_features_list, dtype=np.int64)
+
+    else:  # mol has no bonds
+        edge_index = np.empty((2, 0), dtype=np.int64)
+        edge_attr = np.empty((0, num_bond_features), dtype=np.int64)
+
+    graph = dict()
+    graph['edge_index'] = edge_index
+    graph['edge_feat'] = edge_attr
+    graph['node_feat'] = x
+    graph['node_pos'] = node_positions[:, :2]
+    graph['num_nodes'] = len(x)
+
+    assert (len(graph['edge_feat']) == graph['edge_index'].shape[1])
+    assert (len(graph['node_feat']) == graph['num_nodes'])
+    assert (len(graph['node_pos']) == graph['num_nodes'])
+
+    return graph
+
+def smiles2graphWith3Dposition(smiles_string):
     """
     This function returns same graph dict, but
     added xyz position of atoms calculated from rdkit.
@@ -248,14 +312,13 @@ class DglPCQM4MDatasetWithPositionForDebug(DglPCQM4MDatasetWithPosition):
         }
         return split_dict
 
-
-class PygPCQM4MDatasetForDebug(PygPCQM4MDataset):
+    
+class PygPCQM4MDatasetForDebug(_PygPCQM4MDataset):
     """
     Added node 3D positions and replace tqdm to pqdm.
     """
     def __init__(self, root):
         super().__init__(root)
-    
     
     def get_idx_split(self):
         cur = 102400 - 2048
@@ -267,10 +330,10 @@ class PygPCQM4MDatasetForDebug(PygPCQM4MDataset):
         return split_dict
 
     
-class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
+class PygPCQM4MDatasetWithPosition(_PygPCQM4MDataset):
     def __init__(self, root, smiles2graph = smiles2graphWith2Dposition):
         super().__init__(root, smiles2graph)
-    
+        
     @property
     def processed_file_names(self):
         return 'geometric_data_processed_with_position.pt'
@@ -304,8 +367,8 @@ class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
                 edge_attrs.append(torch.zeros((1, 9)))
                 edge_attrs.append(torch.zeros((1, 9)))
             edge_attr = torch.cat(edge_attrs, -1)
+            
             data.edge_attr = edge_attr
-
             data.x_pos = torch.from_numpy(graph['node_pos']).to(torch.float32)
             data.x = torch.from_numpy(graph['node_feat']).to(torch.int64)
             data.y = torch.Tensor([homolumogap])
@@ -324,8 +387,63 @@ class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
         data, slices = self.collate(data_list)
 
         print('Saving...')
-        torch.save((data, slices), self.processed_paths[0])     
+        torch.save((data, slices), self.processed_paths[0])
+
+        
+class PygPCQM4MDatasetWithPositionLineGraph(PygPCQM4MDatasetWithPosition):
+        
+    @property
+    def processed_file_names(self):
+        return 'geometric_data_processed_with_position_linegraph.pt'
     
+    def process(self):
+        
+        self.data, self.slices = torch.load(self.root + '/processed/'+'geometric_data_processed_with_position.pt')
+        data_df = pd.read_csv(osp.join(self.raw_dir, 'data.csv.gz'))
+        smiles_list = data_df['smiles']
+        homolumogap_list = data_df['homolumogap']
+
+        print('Converting SMILES strings into graphs...')
+        data_list = []
+        for i in tqdm(range(self.slices['y'].size(0)), ascii=True):
+            data = self.get(i)
+            data.x = torch.cat([data.x, data.x_pos], dim = 1)
+            
+            if data.__num_nodes__ == 1:
+                print(f"{i}th molecule has Num nodes == 1,")
+                print(smiles_list[i])
+                print('pass')
+                continue
+            num_edges = data.edge_index.size(1)
+            if data.edge_index.size(1) != data.edge_attr.size(0):
+                print(f"{i}th: edge_index.size(1) != x.edge_attr.size(0), pass")
+                continue
+            data = LineGraph()(data)
+            if data.x.size(0) != num_edges//2:
+                print(f"{i}th: data.x.size(0) != num_edges//2")
+                print("something changed by linegraph transform, pass")
+                continue
+            
+            data.x_pos = data.x[:,-2:]
+            data.x = data.x[:,:-2]
+            data.isLinegraph = True
+            
+            data_list.append(data)
+            
+        # double-check prediction target
+        split_dict = self.get_idx_split()
+        assert(all([not torch.isnan(data_list[i].y)[0] for i in split_dict['train']]))
+        assert(all([not torch.isnan(data_list[i].y)[0] for i in split_dict['valid']]))
+        assert(all([torch.isnan(data_list[i].y)[0] for i in split_dict['test']]))
+
+        if self.pre_transform is not None:
+            data_list = [self.pre_transform(data) for data in data_list]
+
+        data, slices = self.collate(data_list)
+
+        print('Saving...')
+        torch.save((data, slices), self.processed_paths[0])
+        
 
 class PygPCQM4MDatasetWithPositionForDebug(PygPCQM4MDatasetWithPosition):
     def __init__(self, root, smiles2graph=_smiles2graph):

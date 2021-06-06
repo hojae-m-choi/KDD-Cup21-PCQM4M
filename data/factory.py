@@ -1,4 +1,4 @@
-from ogb.lsc import DglPCQM4MDataset, PygPCQM4MDataset
+from ogb.lsc import DglPCQM4MDataset
 from data.dataset import (
     DglPCQM4MDatasetForDebug,
     DglPCQM4MDatasetWithPosition,
@@ -6,6 +6,7 @@ from data.dataset import (
 )
 
 from data.dataset import (
+    PygPCQM4MDataset,
     PygPCQM4MDatasetForDebug,
     PygPCQM4MDatasetWithPosition,
     PygPCQM4MDatasetWithPositionForDebug
