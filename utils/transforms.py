@@ -2,6 +2,7 @@ import torch
 from torch_sparse import coalesce
 from torch_scatter import scatter_add, scatter_mean
 from torch_geometric.utils import remove_self_loops
+import copy
 
 class LineGraph(object):
     r"""Converts a graph to its corresponding line-graph:
@@ -35,7 +36,7 @@ class LineGraph(object):
         (row, col), edge_attr = coalesce(edge_index, edge_attr, N, N)
         node_attrs = data.x
 
-        if self.force_directed or data.is_directed():
+        if self.force_directed:# or data.is_directed():
             i = torch.arange(row.size(0), dtype=torch.long, device=row.device)
 
             count = scatter_add(torch.ones_like(row), row, dim=0,
