@@ -26,7 +26,10 @@ def create_dataset_pyg(args):
             dataset_cls = PygPCQM4MDatasetForDebug
     else:
         if args.add_position:
-            dataset_cls = PygPCQM4MDatasetWithPosition
+            if args.toLinegraph:
+                dataset_cls = PygPCQM4MDatasetWithPosition
+            else:
+                dataset_cls = PygPCQM4MDatasetWithPosition
         else:
             dataset_cls = PygPCQM4MDataset
 

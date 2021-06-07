@@ -1,6 +1,7 @@
 import multiprocessing
 import os.path as osp
 import shutil
+from itertools import repeat, product
 
 import dgl
 from dgl.data.utils import load_graphs, save_graphs, Subset
@@ -22,6 +23,10 @@ from pqdm.processes import pqdm
 from tqdm import tqdm
 
 from utils.transforms import LineGraph
+
+import pickle
+
+from torch_sparse import coalesce, transpose
 
 def _smiles2graph(smiles_string, gap):
     """
@@ -369,8 +374,15 @@ class PygPCQM4MDatasetWithPosition(_PygPCQM4MDataset):
             edge_attr = torch.cat(edge_attrs, -1)
             
             data.edge_attr = edge_attr
-            data.x_pos = torch.from_numpy(graph['node_pos']).to(torch.float32)
             data.x = torch.from_numpy(graph['node_feat']).to(torch.int64)
+            
+            data.x_pos = torch.from_numpy(graph['node_pos']).to(torch.float32)
+            x_pos2D = data.x_pos.reshape( (data.x_pos.size(0), 1, 2) )
+            src_idx = data.edge_index[0,:].transpose(0,-1)
+            dst_idx = data.edge_index[1,:].transpose(0,-1)
+            edge_pos2D = torch.cat( [ x_pos2D[src_idx, :, : ], x_pos2D[dst_idx, :, : ] ], dim = 1)
+            data.edge_pos = torch.mean(edge_pos2D, dim = -2, keepdim = False )
+            
             data.y = torch.Tensor([homolumogap])
 
             data_list.append(data)
@@ -391,60 +403,208 @@ class PygPCQM4MDatasetWithPosition(_PygPCQM4MDataset):
 
         
 class PygPCQM4MDatasetWithPositionLineGraph(PygPCQM4MDatasetWithPosition):
+    def __init__(self, root, smiles2graph = smiles2graphWith2Dposition):
+        super().__init__(root, smiles2graph)
+        
+        self.lined_data, self.lined_slices = torch.load(self.processed_paths[0])
+        self.data, self.slices = torch.load( self.processed_paths[1])
+        self.indices_map = pickle.load( open(self.processed_paths[2], 'rb') )
         
     @property
     def processed_file_names(self):
-        return 'geometric_data_processed_with_position_linegraph.pt'
+        return ('geometric_data_processed_with_position_linegraph.pt',
+                'geometric_data_processed_with_position_onenode.pt',
+                'geometric_data_processed_with_position_linegraph_mapper.pt',
+               )
+    
+    def len(self):
+        for item in self.indices_map.values():
+            return len(item)
+        return 0
+    
+    def get(self, idx: int) -> Data:
+        if hasattr(self, '_data_list'):
+            if self._data_list is None:
+                self._data_list = self.len() * [None]
+            else:
+                data = self._data_list[idx]
+                if data is not None:
+                    return copy.copy(data)
+        
+        idx = self.indices_map['slice_idx'][idx]
+        isLinegraph = self.indices_map['isLinegraph'][idx]
+        
+        if isLinegraph:
+            self_data = self.lined_data
+            self_slices = self.lined_slices
+        else:
+            self_data = self.data
+            self_slices = self.slices
+        
+        data = self_data.__class__()
+        if hasattr(self_data, '__num_nodes__'):
+            data.num_nodes = self_data.__num_nodes__[idx]
+                    
+        for key in self_data.keys:
+            item, slices = self_data[key], self_slices[key]
+            start, end = slices[idx].item(), slices[idx + 1].item()
+            if torch.is_tensor(item):
+                s = list(repeat(slice(None), item.dim()))
+                cat_dim = self_data.__cat_dim__(key, item)
+                if cat_dim is None:
+                    cat_dim = 0
+                s[cat_dim] = slice(start, end)
+            elif start + 1 == end:
+                s = slices[start]
+            else:
+                s = slice(start, end)
+            data[key] = item[s]
+
+        if hasattr(self, '_data_list'):
+            self._data_list[idx] = copy.copy(data)
+
+        return data
+    
     
     def process(self):
         
-        self.data, self.slices = torch.load(self.root + '/processed/'+'geometric_data_processed_with_position.pt')
+#         self.data, self.slices = torch.load(self.root + '/processed/'+'geometric_data_processed_with_position.pt')
         data_df = pd.read_csv(osp.join(self.raw_dir, 'data.csv.gz'))
         smiles_list = data_df['smiles']
         homolumogap_list = data_df['homolumogap']
 
         print('Converting SMILES strings into graphs...')
-        data_list = []
-        for i in tqdm(range(self.slices['y'].size(0)), ascii=True):
-            data = self.get(i)
-            data.x = torch.cat([data.x, data.x_pos], dim = 1)
+        linegraph_data_list = []
+        graph_data_list = []
+        indices_map = {'isLinegraph':[], 'slice_idx': []}
+        for i in tqdm(range(len(smiles_list)), ascii=True):
+            data = Data()
+
+            smiles = smiles_list[i]
+            homolumogap = homolumogap_list[i]
+            graph = self.smiles2graph(smiles)
+            
+            assert(len(graph['edge_feat']) == graph['edge_index'].shape[1])
+            assert(len(graph['node_feat']) == graph['num_nodes'])
+
+            data.__num_nodes__ = int(graph['num_nodes'])
+            data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
+#             edge_attrs = []
+            if len(data.edge_index[0]) > 0:
+                data.edge_attr = torch.from_numpy(graph['edge_feat']).to(torch.int64)
+#                 edge_attrs.append(torch.from_numpy(graph['edge_feat']).to(torch.int64))
+#                 edge_attrs.append(torch.from_numpy(graph['node_feat'][data.edge_index[0]]))
+#                 edge_attrs.append(torch.from_numpy(graph['node_feat'][data.edge_index[1]]))
+            else:
+                data.edge_attr = torch.zeros((1, 3))
+#                 edge_attrs.append(torch.zeros((1, 3)))
+#                 edge_attrs.append(torch.zeros((1, 9)))
+#                 edge_attrs.append(torch.zeros((1, 9)))
+#             edge_attr = torch.cat(edge_attrs, -1)
+            
+#             data.edge_index, data.edge_attr = coalesce(data.edge_index, edge_attr, data.num_nodes, data.num_nodes)
+            
+            data.x = torch.from_numpy(graph['node_feat']).to(torch.int64)
+            
+            data.x_pos = torch.from_numpy(graph['node_pos']).to(torch.float32)
+            x_pos2D = data.x_pos.reshape( (data.x_pos.size(0), 1, 2) )
+            src_idx = data.edge_index[0,:].transpose(0,-1)
+            dst_idx = data.edge_index[1,:].transpose(0,-1)
+            edge_pos2D = torch.cat( [ x_pos2D[src_idx, :, : ], x_pos2D[dst_idx, :, : ] ], dim = 1)
+            data.edge_pos = torch.mean(edge_pos2D, dim = -2, keepdim = False )
+            
+            data.y = torch.Tensor([homolumogap])
+            
+            ####
             
             if data.__num_nodes__ == 1:
                 print(f"{i}th molecule has Num nodes == 1,")
                 print(smiles_list[i])
-                print('pass')
+                print('append original graph')
+                data.isLinegraph = False
+                indices_map['isLinegraph'].append(False)
+                indices_map['slice_idx'].append( len(graph_data_list) )
+                graph_data_list.append(data)
                 continue
-            num_edges = data.edge_index.size(1)
+
             if data.edge_index.size(1) != data.edge_attr.size(0):
                 print(f"{i}th: edge_index.size(1) != x.edge_attr.size(0), pass")
+                data.isLinegraph = False
+                indices_map['isLinegraph'].append(False)
+                indices_map['slice_idx'].append( len(graph_data_list) )
+                graph_data_list.append(data)
                 continue
-            data = LineGraph()(data)
-            if data.x.size(0) != num_edges//2:
-                print(f"{i}th: data.x.size(0) != num_edges//2")
+            
+            data.x = torch.cat([data.x, data.x_pos], dim = 1)
+            data.edge_attr = torch.cat([data.edge_attr, data.edge_pos], dim = 1)
+            num_edges = data.edge_index.size(1)
+#             if data.is_directed():
+#                 edge_index, edge_attr = coalesce(data.edge_index, data.edge_attr, data.num_nodes,
+#                                      data.num_nodes)
+                
+#                 edge_index_t, edge_attr_t = transpose(edge_index, edge_attr, data.num_nodes,
+#                                               data.num_nodes, coalesced=True)
+#                 index_symmetric = torch.all(edge_index == edge_index_t)
+#                 if not index_symmetric:
+#                     print(edge_index)
+#                     print(edge_index_t)
+#                 attr_symmetric = torch.all(data.edge_attr == edge_attr_t)
+#                 if not attr_symmetric:
+#                     print(edge_attr)
+#                     print(edge_attr_t)
+                    
+#                 print(data.num_nodes)
+#                 print(data.edge_attr.shape)
+#                 print(data.edge_index)
+#                 print(f"{i}th isDirected")
+            data_lined = LineGraph()(data)
+            
+            if data_lined.x.size(0) != num_edges//2:
+                print(f"{i}th: data.x.size(0)({data.x.size(0)}) != num_edges//2({num_edges//2})")
+                print(smiles_list[i])
                 print("something changed by linegraph transform, pass")
+                data.isLinegraph = True
+                indices_map['isLinegraph'].append(True)
+                indices_map['slice_idx'].append( len(linegraph_data_list) )
+                graph_data_list.append(data_lined)
                 continue
+                
+            data_lined.x_pos = data_lined.x[:,-2:]
+            data_lined.x = data_lined.x[:,:-2].to(torch.int64)
+            data_lined.edge_pos = data_lined.edge_attr[:,-2:]
+            data_lined.edge_attr = data_lined.edge_attr[:,:-2].to(torch.int64)
             
-            data.x_pos = data.x[:,-2:]
-            data.x = data.x[:,:-2]
-            data.isLinegraph = True
+            data_lined.isLinegraph = True
+            indices_map['isLinegraph'].append(True)
+            indices_map['slice_idx'].append( len(linegraph_data_list) )
             
-            data_list.append(data)
+            linegraph_data_list.append(data_lined)
+            
+            
             
         # double-check prediction target
-        split_dict = self.get_idx_split()
-        assert(all([not torch.isnan(data_list[i].y)[0] for i in split_dict['train']]))
-        assert(all([not torch.isnan(data_list[i].y)[0] for i in split_dict['valid']]))
-        assert(all([torch.isnan(data_list[i].y)[0] for i in split_dict['test']]))
+#         split_dict = self.get_idx_split()
+#         assert(all([not torch.isnan(data_list[i].y)[0] for i in split_dict['train']]))
+#         assert(all([not torch.isnan(data_list[i].y)[0] for i in split_dict['valid']]))
+#         assert(all([torch.isnan(data_list[i].y)[0] for i in split_dict['test']]))
 
-        if self.pre_transform is not None:
-            data_list = [self.pre_transform(data) for data in data_list]
-
-        data, slices = self.collate(data_list)
+#         if self.pre_transform is not None:
+#             data_list = [self.pre_transform(data) for data in data_list]
+        if len(linegraph_data_list) > 0 :
+            lined_data, lined_slices = self.collate(linegraph_data_list)
+        else:
+            lined_slices = {'x':torch.Tensor([])}
+        if len(graph_data_list) > 0 :
+            data, slices = self.collate(graph_data_list)
+        else:
+            slices = {'x':torch.Tensor([])}
 
         print('Saving...')
-        torch.save((data, slices), self.processed_paths[0])
-        
+        torch.save((lined_data, lined_slices), self.processed_paths[0])
+        torch.save((data, slices), self.processed_paths[1])
+        pickle.dump(indices_map, open(self.processed_paths[2], 'wb'))
 
+        
 class PygPCQM4MDatasetWithPositionForDebug(PygPCQM4MDatasetWithPosition):
     def __init__(self, root, smiles2graph=_smiles2graph):
         super().__init__(root, smiles2graph)
