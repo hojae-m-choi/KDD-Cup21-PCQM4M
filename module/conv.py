@@ -21,12 +21,17 @@ class GINConv(MessagePassing):
         self.eps = torch.nn.Parameter(torch.Tensor([0]))
         
         self.bond_encoder = BondEncoder(emb_dim = emb_dim)
+        self.atom_encoder = AtomEncoder(emb_dim = emb_dim)
 
-    def forward(self, x, edge_index, edge_attr, no_emb = False):
+    def forward(self, x, edge_index, edge_attr, no_emb = False, isLinegraph = True):
         if no_emb:
             edge_embedding = edge_attr
         else:
-            edge_embedding = self.bond_encoder(edge_attr)
+            if isLinegraph:
+                edge_embedding = self.atom_encoder(edge_attr)
+            else:    
+                edge_embedding = self.bond_encoder(edge_attr)
+        
         #print(f'shape of edge_embedding: {edge_embedding.shape}')
         #print(f'shape of x: {x.shape}')
         out = self.mlp((1 + self.eps) *x + self.propagate(edge_index, x=x, edge_attr=edge_embedding))
@@ -224,8 +229,6 @@ class GNN_node_Virtualnode(torch.nn.Module):
                 self.convs.append(GINConv(emb_dim))
                 self.batch_norms.append(torch.nn.BatchNorm1d(emb_dim))
             
-            
-                
         else:
             for layer in range(num_layers):
                 if gnn_type == 'gin':
@@ -241,16 +244,15 @@ class GNN_node_Virtualnode(torch.nn.Module):
             self.mlp_virtualnode_list.append(torch.nn.Sequential(torch.nn.Linear(emb_dim, emb_dim), torch.nn.BatchNorm1d(emb_dim), torch.nn.ReLU(), \
                                                     torch.nn.Linear(emb_dim, emb_dim), torch.nn.BatchNorm1d(emb_dim), torch.nn.ReLU()))
 
-
     def forward(self, batched_data):
 
         x, edge_index, edge_attr, batch = batched_data.x, batched_data.edge_index, batched_data.edge_attr, batched_data.batch
-        #print(f'batch: {batch}')
-        #print(f'shape of batch: {batch.shape}')
+        
         ### virtual node embeddings for graphs
         virtualnode_embedding = self.virtualnode_embedding(torch.zeros(batch[-1].item() + 1).to(edge_index.dtype).to(edge_index.device))
 
-        h_list = [self.atom_encoder(x)]
+#         h_list = [self.atom_encoder(x)]
+        h_list = [self.bond_encoder(x)]
         for layer in range(self.num_layers):
             ### add message from virtual nodes to graph nodes
             h_list[layer] = h_list[layer] + virtualnode_embedding[batch]
@@ -258,18 +260,14 @@ class GNN_node_Virtualnode(torch.nn.Module):
             ### Message passing among graph nodes
             if 'gvp' in self.gnn_type:
                 if layer == 0:
-                    x_pos3D = torch.cat ( [batched_data.x_pos, torch.zeros( (batched_data.x_pos.shape[0], 1) ).cuda() ] ,
-                                         1).reshape( (batched_data.x_pos.shape[0], 1, 3) )
-#                     x_pos3D = batched_data.x_pos.reshape( (batched_data.x_pos.shape[0], 1, 3) )
-#                     edge_pos3D = torch.zeros( (batched_data.edge_attr.shape[0], 1, 3) ).cuda()
-                    
-                    src_idx = edge_index[0,:].transpose(0,-1)
-                    dst_idx = edge_index[1,:].transpose(0,-1)
-                    edge_pos3D = torch.cat( [ x_pos3D[src_idx, :, : ], x_pos3D[dst_idx, :, : ] ], dim = 1)
-#                     print(edge_pos3D.shape)    
-                    edge_pos3D = torch.mean(edge_pos3D, dim = -2, keepdim = True ).cuda()
-#                     print(edge_pos3D.shape)
-                    edge_embedding = self.bond_encoder(edge_attr)
+                    x_pos3D = torch.cat ( [batched_data.x_pos, 
+                                           torch.zeros( (batched_data.x_pos.shape[0], 1) ).cuda() ] ,
+                                         dim =1).reshape( (batched_data.x_pos.shape[0], 1, 3) )
+                    edge_pos3D = torch.cat( [batched_data.edge_pos,
+                                             torch.zeros((batched_data.edge_pos.shape[0], 1)).cuda() ],
+                                           dim = 1).reshape((batched_data.edge_pos.shape[0], 1, 3) )
+                    # edge_embedding = self.bond_encoder(edge_attr)
+                    edge_embedding = self.atom_encoder(edge_attr)
                     h = self.gvplayer( (h_list[layer], x_pos3D,), edge_index, (edge_embedding, edge_pos3D)  )  
                     h = self.convs[layer]( h, edge_index, (edge_embedding, edge_pos3D)  )
                     h = self.layer_norm(h)

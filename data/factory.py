@@ -1,15 +1,18 @@
-from ogb.lsc import DglPCQM4MDataset, PygPCQM4MDataset
+from ogb.lsc import DglPCQM4MDataset
 from data.dataset import (
     DglPCQM4MDatasetForDebug,
     DglPCQM4MDatasetWithPosition,
     DglPCQM4MDatasetWithPositionForDebug
 )
-
+from ogb.lsc import PygPCQM4MDataset
 from data.dataset import (
     PygPCQM4MDatasetForDebug,
     PygPCQM4MDatasetWithPosition,
-    PygPCQM4MDatasetWithPositionForDebug
+    PygPCQM4MDatasetWithPositionForDebug,
+    PygPCQM4MDatasetWithPositionLineGraph
 )
+
+from torch import Tensor
 
 def create_dataset(args):
     if args.platform == 'pyg':
@@ -25,7 +28,10 @@ def create_dataset_pyg(args):
             dataset_cls = PygPCQM4MDatasetForDebug
     else:
         if args.add_position:
-            dataset_cls = PygPCQM4MDatasetWithPosition
+            if args.toLinegraph:
+                dataset_cls = PygPCQM4MDatasetWithPositionLineGraph
+            else:
+                dataset_cls = PygPCQM4MDatasetWithPosition
         else:
             dataset_cls = PygPCQM4MDataset
 
@@ -34,6 +40,13 @@ def create_dataset_pyg(args):
     train_dataset = dataset[split_idx['train']]
     valid_dataset = dataset[split_idx['valid']]
     test_dataset = dataset[split_idx['test']]
+    
+    if args.toLinegraph:
+        linegraph_idx = Tensor(dataset.indices_map['isLinegraph']).bool()
+        train_dataset = train_dataset[linegraph_idx[split_idx['train']]]
+        valid_dataset = valid_dataset[linegraph_idx[split_idx['valid']]]
+        test_dataset = test_dataset[linegraph_idx[split_idx['test']]]
+        
     return train_dataset, valid_dataset, test_dataset
 
 

@@ -16,6 +16,7 @@ from torch_geometric.data import DataLoader
 from data.factory import create_dataset
 from engine.train import train_one_epoch, train_one_epoch_pyg
 from engine.valid import validate, validate_pyg
+
 from model.model import Perceiver, GNN
 from utils.checkpoint_saver import CheckpointSaver
 from utils.summary import update_summary
@@ -70,6 +71,7 @@ def seed_everything(seed):
 
 
 def main(args):
+
     shared_params = {
         'num_layers': args.depth,
         'emb_dim': args.emb_dim,
@@ -79,16 +81,6 @@ def main(args):
    
     model = GNN(gnn_type = args.gnn_type, virtual_node = True, **shared_params)
         
-#     model = Perceiver(
-#         depth=args.depth,
-#         emb_dim=args.emb_dim,
-#         self_per_cross=args.self_per_cross,
-#         num_latents=args.num_latents,
-#         latent_dim=args.latent_dim,
-#         attn_dropout=args.attn_dropout,
-#         ff_dropout=args.ff_dropout,
-#     )
-
     model.cuda()
 
     seed_everything(args.seed)
@@ -192,11 +184,12 @@ if __name__ == "__main__":
 
     # train
     parser.add_argument('--data', type=str, default=default_data_folder)
-    parser.add_argument('-b', dest='batch_size', type=int, default=256)
+    parser.add_argument('-b', dest='batch_size', type=int, default=2048)
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--resume', type=str, default='')
     parser.add_argument('--no-resume-opt', action='store_true', default=False)
     parser.add_argument('--add-position', action='store_true', default=False)
+    parser.add_argument('--toLinegraph', action='store_true', default=False)
     parser.add_argument('--sched', type=str, default='step')
     parser.add_argument('--decay', type=float, default=0.0)
 
