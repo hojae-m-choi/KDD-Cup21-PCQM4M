@@ -229,8 +229,11 @@ class GNN_node_Virtualnode(torch.nn.Module):
                 self.batch_norms.append(torch.nn.BatchNorm1d(emb_dim))
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             
 =======
+=======
+>>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
 =======
 >>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
                 
@@ -268,6 +271,7 @@ class GNN_node_Virtualnode(torch.nn.Module):
                 if layer == 0:
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                     x_pos3D = torch.cat ( [batched_data.x_pos, 
                                            torch.zeros( (batched_data.x_pos.shape[0], 1) ).cuda() ] ,
                                          dim =1).reshape( (batched_data.x_pos.shape[0], 1, 3) )
@@ -283,6 +287,8 @@ class GNN_node_Virtualnode(torch.nn.Module):
 =======
 =======
 >>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
+=======
+>>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
                     x_pos3D = torch.cat ( [batched_data.x_pos, torch.zeros( (batched_data.x_pos.shape[0], 1) ).cuda() ] ,
                                          1).reshape( (batched_data.x_pos.shape[0], 1, 3) )
                     #print( f'\nx_pos3D shape: {x_pos3D.shape}')
@@ -292,6 +298,9 @@ class GNN_node_Virtualnode(torch.nn.Module):
                     edge_embedding = self.bond_encoder(edge_attr)
                     h = self.convs[layer]( (h_list[layer], x_pos3D,), edge_index, (edge_embedding, edge_pos3D)  )
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
+=======
 >>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
 =======
 >>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
