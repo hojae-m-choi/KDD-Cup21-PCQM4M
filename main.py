@@ -75,7 +75,8 @@ def main(args):
     shared_params = {
         'num_layers': args.depth,
         'emb_dim': args.emb_dim,
-        'graph_pooling': args.graph_pooling
+        'graph_pooling': args.graph_pooling,
+        'drop_ratio': args.drop_ratio
     }
 
    
@@ -109,7 +110,7 @@ def main(args):
     print(f"Dataset is loaded, took {time.time()-start:.2f}s")
     
     if args.platform == 'pyg':
-        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, pin_memory = True)
         valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False)
     else:
         train_loader = GraphDataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
@@ -204,6 +205,7 @@ if __name__ == "__main__":
     parser.add_argument('--latent-dim', type=int, default=256)
     parser.add_argument('--attn-dropout', type=float, default=0.2)
     parser.add_argument('--ff-dropout', type=float, default=0.2)
+    parser.add_argument('--drop-ratio', type=float, default=0.2)
 
     # misc
     parser.add_argument('--debug', action='store_true', default=False)

@@ -9,11 +9,12 @@ import time
 import numpy as np
 from tqdm import tqdm
 import torch
+from torch_geometric.data import DataLoader
 from dgl.dataloading import GraphDataLoader, AsyncTransferer
 from ogb.lsc import PCQM4MDataset, PCQM4MEvaluator
 
 from data.dataset import _smiles2graph
-from model.model import Perceiver
+from model.model import Perceiver, GNN
 
 
 _logger = logging.getLogger(__name__)
@@ -84,6 +85,24 @@ def test(model, loader, transferer):
 
     return y_pred
 
+def test_pyg(model, loader):
+    model.eval()
+    y_pred = []
+
+    pbar = tqdm(loader, ascii=True)
+    for step, data in enumerate(pbar):
+        data = data.cuda()
+        
+        with torch.no_grad():
+            # Forward
+            pred = model(data)
+            
+        y_pred.append(pred.detach().cpu())
+
+    y_pred = torch.cat(y_pred, dim=0)
+
+    return y_pred
+
 
 class OnTheFlyPCQMDataset(object):
     def __init__(self, smiles_list, smiles2graph=_smiles2graph):
@@ -109,13 +128,15 @@ class OnTheFlyPCQMDataset(object):
 
 
 def main(args):
-    model = Perceiver(
-        depth=args.depth,
-        emb_dim=args.emb_dim,
-        self_per_cross=args.self_per_cross,
-        num_latents=args.num_latents,
-        latent_dim=args.latent_dim,
-    )
+    shared_params = {
+        'num_layers': args.depth,
+        'emb_dim': args.emb_dim,
+        'graph_pooling': args.graph_pooling,
+        'drop_ratio': args.drop_ratio
+    }
+    
+    model = GNN(gnn_type = args.gnn_type, virtual_node = True, **shared_params)
+    
     model.cuda()
 
     seed_everything(args.seed)
@@ -127,18 +148,24 @@ def main(args):
     )
 
     # dataset
-    smiles_dataset = PCQM4MDataset(root='dataset/', only_smiles=True)
-    split_idx = smiles_dataset.get_idx_split()
-
-    test_smiles_dataset = [smiles_dataset[i] for i in split_idx['test']]
-    onthefly_dataset = OnTheFlyPCQMDataset(test_smiles_dataset)
-
-    loader = GraphDataLoader(onthefly_dataset, batch_size=args.batch_size)
-    transferer = AsyncTransferer(torch.device('cuda:0'))
+    print(f"Start loading dataset...")
+    start = time.time()
+    train_dataset, valid_dataset, test_dataset = create_dataset(args)
+    print(f"Dataset is loaded, took {time.time()-start:.2f}s")
+    
+    if args.platform == 'pyg':
+        loader = DataLoader(test_dataset, batch_size=args.batch_size)
+        print('Predicting on test data...')
+        y_pred = test_pyg(model, loader)
+    else:
+        loader = GraphDataLoader(test_dataset, batch_size=args.batch_size)
+        transferer = AsyncTransferer(torch.device('cuda:0'))
+        print('Predicting on test data...')
+        y_pred = test(model, loader, transferer)
+    
     evaluator = PCQM4MEvaluator()
 
-    print('Predicting on test data...')
-    y_pred = test(model, loader, transferer)
+    
     print('Saving test submission file...')
     evaluator.save_test_submission({'y_pred': y_pred}, args.save_test_dir)
 
@@ -158,15 +185,20 @@ if __name__ == "__main__":
     parser.add_argument('--add-position', action='store_true', default=False)
 
     # model
+    parser.add_argument('--gnn-type', type=str, default='gin')
     parser.add_argument('--emb-dim', type=int, default=128)
     parser.add_argument('--depth', type=int, default=3)
+    parser.add_argument('--graph_pooling', type=str, default='sum',
+                        help='graph pooling strategy mean or sum (default: sum)')
     parser.add_argument('--self-per-cross', type=int, default=1)
     parser.add_argument('--num-latents', type=int, default=128)
     parser.add_argument('--latent-dim', type=int, default=256)
+    parser.add_argument('--drop-ratio', type=float, default=0.2)
 
     # misc
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--seed', default=42)
+    parser.add_argument('--platform', type=str, default='pyg')
 
     args = parser.parse_args()
     main(args)
