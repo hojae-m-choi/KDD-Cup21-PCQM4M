@@ -228,8 +228,11 @@ class GNN_node_Virtualnode(torch.nn.Module):
                 self.convs.append(GINConv(emb_dim))
                 self.batch_norms.append(torch.nn.BatchNorm1d(emb_dim))
 <<<<<<< HEAD
+<<<<<<< HEAD
             
 =======
+=======
+>>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
                 
 >>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
         else:
@@ -264,6 +267,7 @@ class GNN_node_Virtualnode(torch.nn.Module):
             if 'gvp' in self.gnn_type:
                 if layer == 0:
 <<<<<<< HEAD
+<<<<<<< HEAD
                     x_pos3D = torch.cat ( [batched_data.x_pos, 
                                            torch.zeros( (batched_data.x_pos.shape[0], 1) ).cuda() ] ,
                                          dim =1).reshape( (batched_data.x_pos.shape[0], 1, 3) )
@@ -277,6 +281,8 @@ class GNN_node_Virtualnode(torch.nn.Module):
                     h = self.layer_norm(h)
                     h = _merge(h[0], h[1])
 =======
+=======
+>>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
                     x_pos3D = torch.cat ( [batched_data.x_pos, torch.zeros( (batched_data.x_pos.shape[0], 1) ).cuda() ] ,
                                          1).reshape( (batched_data.x_pos.shape[0], 1, 3) )
                     #print( f'\nx_pos3D shape: {x_pos3D.shape}')
@@ -285,6 +291,9 @@ class GNN_node_Virtualnode(torch.nn.Module):
                     #print( f'edge_pos3D shape: {edge_pos3D.shape}')
                     edge_embedding = self.bond_encoder(edge_attr)
                     h = self.convs[layer]( (h_list[layer], x_pos3D,), edge_index, (edge_embedding, edge_pos3D)  )
+<<<<<<< HEAD
+>>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
+=======
 >>>>>>> parent of f6d75b0... mod adding gvpconvlayer(layernorm, dropout), instead of gvpconv
                 else:
                     h = self.convs[layer](h_list[layer], edge_index, edge_attr)
