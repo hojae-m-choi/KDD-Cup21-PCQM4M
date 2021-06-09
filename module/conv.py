@@ -258,7 +258,7 @@ class GNN_node_Virtualnode(torch.nn.Module):
             ### Message passing among graph nodes
             if 'gvp' in self.gnn_type:
                 if layer == 0:
-                    x_pos3D = torch.cat ( [batched_data.x_pos, torch.zeros( (batched_data.x_pos.shape[0], 1) ).cuda() ] ,
+                    x_pos3D = torch.cat ( [batched_data.x_pos[:,:2], torch.zeros( (batched_data.x_pos.shape[0], 1) ).cuda() ] ,
                                          1).reshape( (batched_data.x_pos.shape[0], 1, 3) )
 #                     x_pos3D = batched_data.x_pos.reshape( (batched_data.x_pos.shape[0], 1, 3) )
 #                     edge_pos3D = torch.zeros( (batched_data.edge_attr.shape[0], 1, 3) ).cuda()

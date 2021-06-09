@@ -11,6 +11,7 @@ from ogb.utils.features import (
     bond_to_feature_vector,
 )
 
+from multiprocessing import Pool
 from torch_geometric.data import Data
 
 from rdkit import Chem
@@ -268,12 +269,24 @@ class PygPCQM4MDatasetForDebug(PygPCQM4MDataset):
 
     
 class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
-    def __init__(self, root, smiles2graph = smiles2graphWith2Dposition):
+    def __init__(self, root, smiles2graph = smiles2graphWith2Dposition, parallel = False):
+        self.parallel = parallel
         super().__init__(root, smiles2graph)
+        
     
     @property
     def processed_file_names(self):
         return 'geometric_data_processed_with_position.pt'
+    
+    def process_one(self, smiles ):
+        
+#         smiles, homolumogap = ziped[0], ziped[1]
+        graph, _ = self.smiles2graph(smiles, 0)
+
+        assert(len(graph['edge_feat']) == graph['edge_index'].shape[1])
+        assert(len(graph['node_feat']) == graph['num_nodes'])
+        
+        return graph
     
     def process(self):
         data_df = pd.read_csv(osp.join(self.raw_dir, 'data.csv.gz'))
@@ -282,24 +295,41 @@ class PygPCQM4MDatasetWithPosition(PygPCQM4MDataset):
 
         print('Converting SMILES strings into graphs...')
         data_list = []
-        for i in tqdm(range(len(smiles_list))):
-            data = Data()
-
-            smiles = smiles_list[i]
-            homolumogap = homolumogap_list[i]
-            graph, gap = self.smiles2graph(smiles, homolumogap)
+        if self.parallel:
+            with Pool(70) as p:
+                graph_list = p.map(self.process_one, smiles_list)
+            for i, graph in enumerate(graph_list):
+                data = Data()
+                data.__num_nodes__ = int(graph['num_nodes'])
+                data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
+                data.edge_attr = torch.from_numpy(graph['edge_feat']).to(torch.int64)
+                data.x_pos = torch.from_numpy(graph['node_pos']).to(torch.float32)
+                data.x = torch.from_numpy(graph['node_feat']).to(torch.int64)
+                data.y = torch.Tensor([homolumogap_list[i]])
+                
+                data_list.append(data)
             
-            assert(len(graph['edge_feat']) == graph['edge_index'].shape[1])
-            assert(len(graph['node_feat']) == graph['num_nodes'])
+            print('done')
+            
+        else:
+            for i in tqdm(range(len(smiles_list))):
+                data = Data()
 
-            data.__num_nodes__ = int(graph['num_nodes'])
-            data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
-            data.edge_attr = torch.from_numpy(graph['edge_feat']).to(torch.int64)
-            data.x_pos = torch.from_numpy(graph['node_pos']).to(torch.float32)
-            data.x = torch.from_numpy(graph['node_feat']).to(torch.int64)
-            data.y = torch.Tensor([homolumogap])
+                smiles = smiles_list[i]
+                homolumogap = homolumogap_list[i]
+                graph, gap = self.smiles2graph(smiles, homolumogap)
 
-            data_list.append(data)
+                assert(len(graph['edge_feat']) == graph['edge_index'].shape[1])
+                assert(len(graph['node_feat']) == graph['num_nodes'])
+
+                data.__num_nodes__ = int(graph['num_nodes'])
+                data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
+                data.edge_attr = torch.from_numpy(graph['edge_feat']).to(torch.int64)
+                data.x_pos = torch.from_numpy(graph['node_pos']).to(torch.float32)
+                data.x = torch.from_numpy(graph['node_feat']).to(torch.int64)
+                data.y = torch.Tensor([homolumogap])
+
+                data_list.append(data)
 
         # double-check prediction target
         split_dict = self.get_idx_split()
